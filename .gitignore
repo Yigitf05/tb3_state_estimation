@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+*.db3
+*.mcap
