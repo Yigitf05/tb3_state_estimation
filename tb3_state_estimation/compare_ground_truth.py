@@ -162,7 +162,7 @@ def verdict(r):
     return p, h, "OUTSIDE BOUNDS: diagnose before touching offline results"
 
 
-def report(odom, truth, noisy=None, quiet=False):
+def report(odom, truth, noisy=None, quiet=False, until=None):
     stills = still_segments(odom)
     if not stills:
         raise SystemExit("No stationary stretch >= %.0f s in /odom; cannot anchor."
@@ -174,6 +174,14 @@ def report(odom, truth, noisy=None, quiet=False):
     i0, i1 = stills[0]
     anchor_t = max(odom[i0, T], odom[i1, T] - ANCHOR_LEAD_SEC)
 
+    # Optional analysis window: keep only data up to `until` seconds after
+    # t0 (e.g. to judge the run before a collision). The anchor is unchanged.
+    if until is not None:
+        odom = odom[odom[:, T] <= anchor_t + until]
+        if noisy is not None:
+            noisy = noisy[noisy[:, T] <= anchor_t + until]
+        stills = still_segments(odom)
+
     results = [analyze_track("/odom", odom, truth, anchor_t)]
     if noisy is not None:
         results.append(analyze_track("/odom_noisy", noisy, truth, anchor_t))
@@ -184,7 +192,8 @@ def report(odom, truth, noisy=None, quiet=False):
     dt_all = np.clip(np.diff(odom[:, T]), 0.0, 0.25)
     path = float(np.sum(np.abs(odom[1:, V]) * dt_all))
     print(f"/odom {len(odom)} msgs, /ground_truth {len(truth)} msgs, "
-          f"{odom[-1, T] - t0:.1f} s, path {path:.2f} m")
+          f"{odom[-1, T] - t0:.1f} s, path {path:.2f} m"
+          + ("" if until is None else f"  [window: t - t0 <= {until:.1f} s]"))
     print(f"anchor t0 = {anchor_t - t0:.2f} s after first /odom stamp "
           f"({ANCHOR_LEAD_SEC} s before first motion)")
     tw = results[0]["T_WO"]
@@ -213,6 +222,12 @@ def report(odom, truth, noisy=None, quiet=False):
               f"max |.| {np.degrees(np.abs(e['heading']).max()):.4f} deg")
         print(f"  position final {1000 * e['pos'][-1]:.2f} mm, "
               f"max {1000 * e['pos'].max():.2f} mm")
+        # Where the error first breaks out: locates events such as a collision.
+        for thr_mm in (5, 20, 100):
+            hit = np.flatnonzero(1000 * e["pos"] > thr_mm)
+            when = (f"t - t0 = {r['t'][hit[0]] - anchor_t:.1f} s" if len(hit)
+                    else "never")
+            print(f"    first exceeds {thr_mm:>3} mm: {when}")
         print(f"  along    final {1000 * e['along'][-1]:+.2f} mm, "
               f"RMS {1000 * rms(e['along']):.2f} mm")
         print(f"  cross    final {1000 * e['cross'][-1]:+.2f} mm, "
@@ -343,6 +358,8 @@ def main():
     ap.add_argument("bag", nargs="?")
     ap.add_argument("--truth-topic", default="/ground_truth")
     ap.add_argument("--noisy-topic", default="/odom_noisy")
+    ap.add_argument("--until", type=float, default=None,
+                    help="analyse only up to this many seconds after t0")
     ap.add_argument("--self-test", action="store_true")
     ap.add_argument("--plot", action="store_true")
     args = ap.parse_args()
@@ -360,7 +377,7 @@ def main():
         print(f"(no {args.noisy_topic}: {exc})")
         noisy = None
 
-    results, _, anchor_t = report(odom, truth, noisy)
+    results, _, anchor_t = report(odom, truth, noisy, until=args.until)
 
     if args.plot:
         import matplotlib.pyplot as plt
