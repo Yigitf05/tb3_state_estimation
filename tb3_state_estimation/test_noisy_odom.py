@@ -36,7 +36,9 @@ Prediction written down before running (see project notes):
     - P's x/y variance grows in both cases (x, y unobservable)
 
 The predict/update sequencing, dt source (header.stamp) and dt guards
-match ekf_node.py exactly, so this is a faithful predictor of the node.
+match ekf_node.py, so this is a faithful predictor of the node. The one
+difference is the order of an odom and an IMU message with the same stamp,
+see run_filter().
 
 Usage:
     python3 test_noisy_odom.py <bag_dir> [--seeds 20] [--mismatch 0.005]
@@ -141,10 +143,17 @@ def corrupt_odometry(odom, b, s_r, s_l, sigma, rng, c=0.0):
     return v_n, track
 
 
-def run_filter(odom, v_control, imu):
+def run_filter(odom, v_control, imu, imu_first=False):
     """Replay odom (predict) and imu (update) events in header-stamp order,
-    exactly as ekf_node.py would receive them. Returns track (N, 3) and
-    the full 2x2 x/y covariance block (N, 2, 2) at each odom message."""
+    as ekf_node.py receives them. Returns track (N, 3) and the full 2x2
+    x/y covariance block (N, 2, 2) at each odom message.
+
+    Odom and IMU share a stamp at every odom tick. Default: odom first on
+    equal stamps. This is the offline experiment's convention and all its
+    published results use it. imu_first=True applies the IMU sample first,
+    the order the live node is expected to see, since its odometry arrives
+    through the relay one hop after the IMU (check_live_ekf.py compares
+    both orders)."""
     ekf = DifferentialDriveEKF(
         initial_state=[odom[0, PX], odom[0, PY], odom[0, YAW], odom[0, W]],
         # Odom frame is defined by the start pose: position and heading are
@@ -153,9 +162,16 @@ def run_filter(odom, v_control, imu):
         initial_covariance=np.diag([1e-8, 1e-8, 1e-8, 1e-3]),
     )
 
-    # (time, kind, index); kind 0 = odom, 1 = imu. On equal stamps, odom first.
-    events = [(t, 0, k) for k, t in enumerate(odom[:, T])]
-    events += [(t, 1, j) for j, t in enumerate(imu[:, T]) if t >= odom[0, T]]
+    # (time, kind, index). On equal stamps the lower kind is processed first.
+    k_odom, k_imu = (1, 0) if imu_first else (0, 1)
+    t_start = odom[0, T]
+    events = [(t, k_odom, k) for k, t in enumerate(odom[:, T])]
+    # IMU stamped before the first odom message is dropped, as in the node.
+    # With imu_first, an IMU message stamped exactly at the first odom
+    # message would reach the node before initialization, so it is dropped
+    # too. With the default this is the original t >= t_start.
+    events += [(t, k_imu, j) for j, t in enumerate(imu[:, T])
+               if t > t_start or (t == t_start and not imu_first)]
     events.sort()
 
     track = np.empty((len(odom), 3))
@@ -165,7 +181,7 @@ def run_filter(odom, v_control, imu):
     last_t = odom[0, T]
 
     for t, kind, idx in events:
-        if kind == 1:
+        if kind == k_imu:
             ekf.update_gyro(imu[idx, 1])
             continue
         if idx == 0:
