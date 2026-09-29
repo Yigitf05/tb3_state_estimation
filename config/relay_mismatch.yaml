@@ -1,0 +1,11 @@
+# Relay config for one recording. Copy into the bag folder as
+# relay_params.yaml after recording, so the bag carries its own config.
+# Doubles need a decimal point: 0.0, not 0.
+odom_noise_relay:
+  ros__parameters:
+    mismatch: 0.005
+    sigma: 0.0
+    common_scale: 0.0
+    wheel_separation: 0.160
+    seed: 0
+    max_dt: 0.1
