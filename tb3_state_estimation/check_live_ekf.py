@@ -36,14 +36,14 @@ zero and an initial pose from the message look the same here. The node's
 "Initialized ..." log line is the direct evidence for that part.
 
 Run from the same folder as test_noisy_odom.py:
-    python3 check_live_ekf.py ~/bags/ekf_gt_run1 [--until <s after t0>] [--plot]
+    python3 check_live_ekf.py ~/bags/ekf_gt_run1 [--until <s after t0>] [--plot] [--save PNG]
 """
 
 import argparse
 
 import numpy as np
 
-from compare_ground_truth import anchor_time
+from compare_ground_truth import anchor_time, track_style
 from test_noisy_odom import PX, PY, T, V, W, YAW, errors, load_bag, rms, run_filter
 from tb3_state_estimation.differential_drive_ekf import wrap_angle
 
@@ -54,6 +54,9 @@ E1A_HEADING_DEG = 0.05
 STILL_V = 1e-3   # [m/s]
 STILL_W = 1e-3   # [rad/s]
 ORDERS = (("odom first", False), ("IMU first", True))
+# Replay orders are not tracks, so they deliberately avoid the track colours
+# (black, blue, red, green) used in every other figure.
+ORDER_COLORS = ("tab:orange", "tab:purple")
 
 
 def verdict(ok):
@@ -162,7 +165,9 @@ def main():
     ap.add_argument("--until", type=float, default=None,
                     help="analyse only up to this many seconds after t0, "
                          "the same t0 as compare_ground_truth.py")
-    ap.add_argument("--plot", action="store_true")
+    ap.add_argument("--plot", action="store_true", help="show the figure in a window")
+    ap.add_argument("--save", metavar="PNG", default=None,
+                    help="write the figure to this file (no window unless --plot)")
     args = ap.parse_args()
 
     clean, _ = load_bag(args.bag, odom_topic="/odom")
@@ -185,26 +190,36 @@ def main():
     ok = ok_a and ok_1
     print("E1 checks passed." if ok else "Some E1 checks FAILED.")
 
-    if args.plot:
+    if args.plot or args.save:
+        import matplotlib
+        if not args.plot:
+            matplotlib.use("Agg")  # file output only, no window needed
         import matplotlib.pyplot as plt
         fig, ax = plt.subplots(3, 1, figsize=(12, 10), sharex=True)
         t1 = e1["t"] - t0
-        for (label, _), col in zip(ORDERS, ("r", "b")):
+        for (label, _), col in zip(ORDERS, ORDER_COLORS):
             d_head, d_pos = e1["res"][label]
-            ax[0].plot(t1, np.degrees(d_head), col, label=f"node - replay ({label})")
-            ax[1].plot(t1, 1000 * d_pos, col, label=f"node - replay ({label})")
-        ax[0].set_ylabel("E1 heading diff [deg]")
-        ax[0].legend()
-        ax[1].set_ylabel("E1 position diff [mm]")
-        ax[1].legend()
+            ax[0].plot(t1, np.degrees(d_head), color=col, label=f"node - replay ({label})")
+            ax[1].plot(t1, 1000 * d_pos, color=col, label=f"node - replay ({label})")
+        ax[0].set_title("E1: live node minus offline replay, both orders for equal stamps")
+        ax[0].set_ylabel("heading diff [deg]")
+        ax[0].legend(fontsize="small")
+        ax[1].set_ylabel("position diff [mm]")
+        ax[1].legend(fontsize="small")
         t2 = e2["t"] - t0
-        ax[2].plot(t2, np.degrees(e2["/odom_noisy"]["heading"]), "r", label="raw /odom_noisy")
-        ax[2].plot(t2, np.degrees(e2["/odometry/filtered"]["heading"]), "b", label="EKF")
-        ax[2].set_ylabel("E2 heading error vs clean [deg]")
+        for topic in ("/odom_noisy", "/odometry/filtered"):
+            lab, col, _ = track_style(topic)
+            ax[2].plot(t2, np.degrees(e2[topic]["heading"]), color=col, label=lab)
+        ax[2].set_title("E2: heading error against clean odometry")
+        ax[2].set_ylabel("heading error [deg]")
         ax[2].set_xlabel("t - t0 [s]")
-        ax[2].legend()
+        ax[2].legend(fontsize="small")
         plt.tight_layout()
-        plt.show()
+        if args.save:
+            fig.savefig(args.save, dpi=150, bbox_inches="tight")
+            print(f"saved {args.save}")
+        if args.plot:
+            plt.show()
 
     raise SystemExit(0 if ok else 1)
 

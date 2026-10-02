@@ -44,7 +44,7 @@ Usage:
     python3 test_noisy_odom.py <bag_dir> [--seeds 20] [--mismatch 0.005]
                                [--sigma 0.03] [--common-scale 0.0]
                                [--gyro-bias 0.0] [--sweep]
-                               [--b 0.160] [--plot]
+                               [--b 0.160] [--plot] [--save PNG]
 """
 
 import argparse
@@ -242,7 +242,9 @@ def main():
                     help="constant gyro yaw-rate bias added to /imu [deg/s]")
     ap.add_argument("--sweep", action="store_true",
                     help="sweep gyro bias values and print the crossover table")
-    ap.add_argument("--plot", action="store_true")
+    ap.add_argument("--plot", action="store_true", help="show the figure in a window")
+    ap.add_argument("--save", metavar="PNG", default=None,
+                    help="write the seed-0 figure to this file (no window unless --plot)")
     args = ap.parse_args()
 
     odom, imu = load_bag(args.bag)
@@ -352,41 +354,62 @@ def main():
         w = 100 * np.array(within[k])
         print(f"  {k:<6} {w.mean():6.1f}% (min over seeds {w.min():.1f}%)")
 
-    if args.plot:
+    if args.plot or args.save:
+        import matplotlib
+        if not args.plot:
+            matplotlib.use("Agg")  # file output only, no window needed
         import matplotlib.pyplot as plt
+        # Imported here, not at the top: compare_ground_truth imports this
+        # module, so a top-level import would be circular. One colour per
+        # track across all figures: clean odometry blue, noisy red, EKF green.
+        from compare_ground_truth import track_style
+
+        ref_lab, ref_col, _ = track_style("/odom")
+        raw_lab, raw_col, _ = track_style("/odom_noisy")
+        ekf_lab, ekf_col, _ = track_style("/odometry/filtered")
+        ref_lab = f"{ref_lab} (reference)"
 
         raw, filt, P_xy = seed0
         t = odom[:, T] - odom[0, T]
         er, ef = errors(raw, odom), errors(filt, odom)
         sa, sc = sigma_along_cross(P_xy, odom)
         fig, ax = plt.subplots(2, 2, figsize=(13, 9))
+        fig.suptitle(f"Offline noise injection, seed 0 of {args.seeds}: "
+                     f"mismatch {100 * args.mismatch:.1f}%, sigma {100 * args.sigma:.0f}% "
+                     f"per wheel, gyro bias {args.gyro_bias:g} deg/s")
 
-        ax[0, 0].plot(odom[:, PX], odom[:, PY], "k-", label="truth")
-        ax[0, 0].plot(raw[:, 0], raw[:, 1], "r--", label="raw noisy odom")
-        ax[0, 0].plot(filt[:, 0], filt[:, 1], "b-", alpha=0.7, label="EKF")
+        ax[0, 0].plot(odom[:, PX], odom[:, PY], color=ref_col, linestyle="-", label=ref_lab)
+        ax[0, 0].plot(raw[:, 0], raw[:, 1], color=raw_col, linestyle=":", label=raw_lab)
+        ax[0, 0].plot(filt[:, 0], filt[:, 1], color=ekf_col, linestyle="-.", label=ekf_lab)
         ax[0, 0].set_aspect("equal")
-        ax[0, 0].set_title("Trajectory (seed 0)")
-        ax[0, 0].legend()
+        ax[0, 0].set_title("Trajectory")
+        ax[0, 0].set_xlabel("x [m]")
+        ax[0, 0].set_ylabel("y [m]")
+        ax[0, 0].legend(fontsize="small")
 
-        ax[0, 1].plot(t, np.degrees(er["heading"]), "r", label="raw")
-        ax[0, 1].plot(t, np.degrees(ef["heading"]), "b", label="EKF")
+        ax[0, 1].plot(t, np.degrees(er["heading"]), color=raw_col, label=raw_lab)
+        ax[0, 1].plot(t, np.degrees(ef["heading"]), color=ekf_col, label=ekf_lab)
         ax[0, 1].set_xlabel("t [s]")
         ax[0, 1].set_ylabel("heading error [deg]")
-        ax[0, 1].set_title("Heading error vs truth")
-        ax[0, 1].legend()
+        ax[0, 1].set_title("Heading error against clean odometry")
+        ax[0, 1].legend(fontsize="small")
 
         for a, key, sig, name in ((ax[1, 0], "along", sa, "Along-track"),
                                   (ax[1, 1], "cross", sc, "Cross-track")):
-            a.plot(t, 1000 * ef[key], "b", label="EKF error")
-            a.fill_between(t, -2000 * sig, 2000 * sig, color="b", alpha=0.15,
-                           label="EKF +-2 sigma")
+            a.plot(t, 1000 * ef[key], color=ekf_col, label="EKF error")
+            a.fill_between(t, -2000 * sig, 2000 * sig, color=ekf_col, alpha=0.15,
+                           label="EKF ±2 sigma")
             a.set_xlabel("t [s]")
             a.set_ylabel("[mm]")
             a.set_title(f"{name}: EKF error vs its own claimed uncertainty")
-            a.legend()
+            a.legend(fontsize="small")
 
         plt.tight_layout()
-        plt.show()
+        if args.save:
+            fig.savefig(args.save, dpi=150, bbox_inches="tight")
+            print(f"saved {args.save}")
+        if args.plot:
+            plt.show()
 
 
 if __name__ == "__main__":
