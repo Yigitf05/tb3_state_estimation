@@ -38,7 +38,7 @@ Step 3 prediction (live EKF vs truth): max heading error below 0.05 deg, and
 position error following clean /odom's own turn-driven curve, within ~20 mm.
 
 Usage:
-    python3 compare_ground_truth.py <bag_dir> [--until <s after t0>] [--plot]
+    python3 compare_ground_truth.py <bag_dir> [--until <s after t0>] [--plot] [--save PNG]
     python3 compare_ground_truth.py --self-test
 """
 
@@ -56,6 +56,21 @@ MIN_STILL_SEC = 2.0      # shorter stationary stretches are ignored
 ANCHOR_LEAD_SEC = 0.5    # anchor this long before the first motion
 SPIN_V_MAX = 0.01        # [m/s]   in-place spin: tiny v ...
 SPIN_W_MIN = 0.2         # [rad/s] ... and a real turn rate
+
+# One label, colour and trajectory line style per track, keyed by topic, so a
+# track looks the same in every figure and in the RViz demo video:
+# ground truth black, clean odometry blue, noisy odometry red, EKF green.
+TRACK_STYLE = {
+    "/ground_truth": ("ground truth", "black", "-"),
+    "/odom": ("clean odometry", "tab:blue", "--"),
+    "/odom_noisy": ("noisy wheel odometry", "red", ":"),
+    "/odometry/filtered": ("EKF", "#00aa00", "-."),
+}
+
+
+def track_style(name):
+    """(label, colour, trajectory line style) for a topic; grey if unknown."""
+    return TRACK_STYLE.get(name, (name, "0.5", "-"))
 
 
 # ---------------------------------------------------------------- SE(2) ---
@@ -384,7 +399,9 @@ def main():
     ap.add_argument("--until", type=float, default=None,
                     help="analyse only up to this many seconds after t0")
     ap.add_argument("--self-test", action="store_true")
-    ap.add_argument("--plot", action="store_true")
+    ap.add_argument("--plot", action="store_true", help="show the figure in a window")
+    ap.add_argument("--save", metavar="PNG", default=None,
+                    help="write the figure to this file (no window unless --plot)")
     args = ap.parse_args()
 
     if args.self_test:
@@ -413,31 +430,47 @@ def main():
                   f"(predicted < 0.05); max pos {p:.2f} mm against clean /odom's "
                   f"{p_odom:.2f} mm (predicted: same curve, within ~20 mm)")
 
-    if args.plot:
+    if args.plot or args.save:
+        import matplotlib
+        if not args.plot:
+            matplotlib.use("Agg")  # file output only, no window needed
         import matplotlib.pyplot as plt
         fig, ax = plt.subplots(2, 2, figsize=(13, 9))
         r0 = results[0]
-        ax[0, 0].plot(r0["G_O"][:, 0], r0["G_O"][:, 1], "k-", label="ground truth")
-        styles = ("b--", "r:", "g-")
-        colors = ("b", "r", "g")
-        for r, style in zip(results, styles):
-            ax[0, 0].plot(r["O"][:, 0], r["O"][:, 1], style, label=r["name"])
+        lab, col, ls = track_style("/ground_truth")
+        ax[0, 0].plot(r0["G_O"][:, 0], r0["G_O"][:, 1], color=col, linestyle=ls,
+                      label=lab)
+        for r in results:
+            lab, col, ls = track_style(r["name"])
+            ax[0, 0].plot(r["O"][:, 0], r["O"][:, 1], color=col, linestyle=ls,
+                          label=lab)
         ax[0, 0].set_aspect("equal")
         ax[0, 0].set_title("Trajectories in the clean odom frame")
-        ax[0, 0].legend()
-        for r, col in zip(results, colors):
+        ax[0, 0].set_xlabel("x [m]")
+        ax[0, 0].set_ylabel("y [m]")
+        ax[0, 0].legend(fontsize="small")
+        for r in results:
+            lab, col, _ = track_style(r["name"])
             tt = r["t"] - anchor_t
-            ax[0, 1].plot(tt, np.degrees(r["e"]["heading"]), col, label=r["name"])
-            ax[1, 0].plot(tt, 1000 * r["e"]["along"], col, label=r["name"])
-            ax[1, 1].plot(tt, 1000 * r["e"]["cross"], col, label=r["name"])
+            # Unwrapped for display only: an error beyond 180 deg (a collision)
+            # stays one continuous curve instead of jumping at +-180 deg.
+            # The printed numbers above are unchanged.
+            ax[0, 1].plot(tt, np.degrees(np.unwrap(r["e"]["heading"])), color=col,
+                          label=lab)
+            ax[1, 0].plot(tt, 1000 * r["e"]["along"], color=col, label=lab)
+            ax[1, 1].plot(tt, 1000 * r["e"]["cross"], color=col, label=lab)
         for a, lab in ((ax[0, 1], "heading error [deg]"),
                        (ax[1, 0], "along-track error [mm]"),
                        (ax[1, 1], "cross-track error [mm]")):
             a.set_xlabel("t - t0 [s]")
             a.set_ylabel(lab)
-            a.legend()
+            a.legend(fontsize="small")
         plt.tight_layout()
-        plt.show()
+        if args.save:
+            fig.savefig(args.save, dpi=150, bbox_inches="tight")
+            print(f"saved {args.save}")
+        if args.plot:
+            plt.show()
 
 
 if __name__ == "__main__":
