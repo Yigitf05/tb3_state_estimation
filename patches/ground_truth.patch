@@ -1,0 +1,20 @@
+diff --git a/turtlebot3_gazebo/models/turtlebot3_burger/model.sdf b/turtlebot3_gazebo/models/turtlebot3_burger/model.sdf
+index 031697d..237b9cb 100644
+--- a/turtlebot3_gazebo/models/turtlebot3_burger/model.sdf
++++ b/turtlebot3_gazebo/models/turtlebot3_burger/model.sdf
+@@ -403,5 +403,15 @@
+       <joint_name>wheel_right_joint</joint_name>
+     </plugin>
+ 
++    <plugin filename="gz-sim-odometry-publisher-system"
++            name="gz::sim::systems::OdometryPublisher">
++      <odom_frame>world</odom_frame>
++      <robot_base_frame>base_footprint</robot_base_frame>
++      <odom_publish_frequency>50</odom_publish_frequency>
++      <odom_topic>/ground_truth</odom_topic>
++      <tf_topic>/ground_truth_tf</tf_topic>
++      <dimensions>3</dimensions>
++    </plugin>
++    
+   </model>
+ </sdf>
