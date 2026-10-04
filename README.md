@@ -4,7 +4,11 @@ This package runs an extended Kalman filter on a simulated TurtleBot3 Burger (RO
 
 ## Demo
 
-<!-- Session 5: in GitHub's web editor, drag ekf_demo.mp4 onto this line. GitHub uploads the file and inserts a link, which the page shows as a video player. -->
+
+
+https://github.com/user-attachments/assets/1172024b-9cda-40e2-b46a-0b1b001e45af
+
+
 
 Replay of the recorded run behind the results below, at 3x speed. Black is Gazebo ground truth, red is noisy wheel odometry, green is the EKF. Both estimates use the same wheel data. Raw odometry ends about 0.6 m and 31 deg off, while the EKF stays on the true path.
 
