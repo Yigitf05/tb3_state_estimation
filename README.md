@@ -151,7 +151,7 @@ Each part was checked before the next part used its output. The relay was checke
 
 ## Reproduce
 
-Developed on Linux Mint 22.3 (Ubuntu 24.04 base) with ROS 2 Jazzy and Gazebo Harmonic (`ros-jazzy-ros-gz`).
+Tested on Linux Mint 22.3 (Ubuntu 24.04 base) with ROS 2 Jazzy and Gazebo Harmonic (`ros-jazzy-ros-gz`).
 
 ### Build
 
